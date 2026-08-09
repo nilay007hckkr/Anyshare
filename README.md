@@ -50,29 +50,33 @@ The project utilizes a **True Wi-Fi Direct (P2P)** topology for maximum throughp
 
 Here is a deep dive into the actual file transfer animation and what happens under the hood during a session:
 
+<div align="center">
+  <img src="assets/transfer_animation.svg" alt="Animated File Transfer Chunk" width="100%" />
+</div>
+
+<br />
+
 ```mermaid
 sequenceDiagram
-    participant Linux as 💻 Linux (PN532)
-    participant Engine as ⚙️ C++ Engine
-    participant Android as 📱 Android (GO)
+    participant Linux as Linux Hardware
+    participant Engine as C++ Engine
+    participant Android as Android Phone
 
-    Note over Linux,Android: ⚡ 1. OOB Handshake Phase
-    Linux->>Android: 📳 Physical NFC Tap
-    Android-->>Linux: 📨 NDEF JSON Payload (SSID, PSK, IP, Port, File Metadata)
+    Note over Linux,Android: 1. OOB Handshake Phase
+    Linux->>Android: Physical NFC Tap
+    Android-->>Linux: NDEF Payload (IP, Port)
     
-    Note over Linux,Android: 🔗 2. Network Join Phase
-    Linux->>Linux: 📡 nmcli dev wifi connect (SSID)
+    Note over Linux,Android: 2. Network Join Phase
+    Linux->>Linux: Connect to Hotspot (nmcli)
     
-    Note over Linux,Android: 🚀 3. High-Speed TCP Transfer
-    Linux->>Engine: 🚀 startTransfer(HandoverStrategy)
-    Engine->>Android: 🔌 TCP async_connect(192.168.49.1:8080)
-    loop 📦 64KB Chunk Streaming
-        Engine->>Android: 📤 async_write(binary_chunk)
-        Engine->>Linux: 📊 onProgress(percent)
+    Note over Linux,Android: 3. High-Speed TCP Transfer
+    Linux->>Engine: startTransfer(strategy)
+    Engine->>Android: TCP async_connect()
+    loop 64KB Chunk Streaming
+        Engine->>Android: async_write(binary_chunk)
+        Engine->>Linux: onProgress(percent)
     end
-    Engine->>Android: 🛑 Graceful Socket Shutdown
-    
-    Note over Linux,Android: ✅ Transfer Complete!
+    Engine->>Android: Graceful Socket Shutdown
 ```
 
 ### 📄 Data Payload Specification (NDEF)
