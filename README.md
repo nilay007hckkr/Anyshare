@@ -19,9 +19,9 @@
 
 <br />
 
-## 📖 1. Project Overview
+## 1. Project Overview
 
-This project implements a high-performance, cross-platform, out-of-band (OOB) local file transfer system between Linux and Android devices. Designed as a **true off-grid alternative to AirDrop**, it utilizes **Near Field Communication (NFC)** for seamless, zero-configuration device discovery and **Wi-Fi Direct (Ad-Hoc P2P)** for high-speed data transfer.
+This project implements a high-performance, cross-platform, out-of-band (OOB) local file transfer system between Linux and Android devices. Designed as a true off-grid alternative to AirDrop, it utilizes Near Field Communication (NFC) for seamless, zero-configuration device discovery and Wi-Fi Direct (Ad-Hoc P2P) for high-speed data transfer.
 
 By leveraging a custom C++17 socket engine, the core file transfer logic is completely decoupled from the hardware and operating system constraints, ensuring high performance, zero memory bloat, and maximum code reusability across platforms.
 
@@ -29,57 +29,85 @@ By leveraging a custom C++17 socket engine, the core file transfer logic is comp
 <div align="center"><img src="https://capsule-render.vercel.app/api?type=rect&color=00B894&height=4&width=300" /></div>
 <br />
 
-## 🏗️ 2. System Architecture & Topology
+## 2. System Architecture & Topology
 
-The project utilizes a **True Wi-Fi Direct (P2P)** topology for maximum throughput:
+The project utilizes a True Wi-Fi Direct (P2P) topology for maximum throughput:
 
-* 📱 **Group Owner (Router):** The Android device acts as the Wi-Fi Direct Group Owner (GO), generating a temporary, hidden Wi-Fi network and assigning itself the static IP `192.168.49.1`.
-* 💻 **Client:** The Linux machine acts as the client, receiving the network credentials via NFC and connecting to the hotspot using OS-level network managers.
-* ⚙️ **Core Engine:** A shared C++ engine manages asynchronous TCP streams to transfer files over the established local network.
+* **Group Owner (Router):** The Host device acts as the Wi-Fi Direct Group Owner (GO), generating a temporary, hidden Wi-Fi network and assigning itself the static IP `192.168.49.1`.
+* **Client:** The Client machine receives the network credentials via NFC and connects to the hotspot using OS-level network managers.
+* **Core Engine:** A shared C++ engine manages asynchronous TCP streams to transfer files over the established local network.
 
-### 📐 2.1 Design Patterns (GoF)
-* 🧩 **Strategy Pattern (`INfcHandover`):** Abstracts the network credential exchange mechanism. Allows the core engine to function identically regardless of whether the handover occurs via a physical PN532 module on Linux or native Android APIs.
-* 🔌 **Adapter Pattern:** Encapsulates low-level C libraries (`libnfc`) into modern C++ smart pointers to prevent memory leaks and provide an object-oriented interface.
-* 📡 **Observer Pattern (`IProgressObserver`):** Decouples the background network threading from the UI, allowing asynchronous progress updates (0-100%) without blocking the data stream.
+### 2.1 Design Patterns (GoF)
+* **Strategy Pattern (`INfcHandover`):** Abstracts the network credential exchange mechanism. Allows the core engine to function identically regardless of whether the handover occurs via a physical PN532 module on Linux or native Android APIs.
+* **Adapter Pattern:** Encapsulates low-level C libraries (`libnfc`) into modern C++ smart pointers to prevent memory leaks and provide an object-oriented interface.
+* **Observer Pattern (`IProgressObserver`):** Decouples the background network threading from the UI, allowing asynchronous progress updates (0-100%) without blocking the data stream.
 
 <br />
 <div align="center"><img src="https://capsule-render.vercel.app/api?type=rect&color=0984E3&height=4&width=300" /></div>
 <br />
 
-## 🔄 Dynamic Transfer Workflow (Under the Hood)
+## 3. Dynamic Transfer Workflow (Under the Hood)
 
-Here is a deep dive into the actual file transfer animation and what happens under the hood during a session:
+Here is a deep dive into the actual file transfer animations across all supported platform combinations. Click to expand each transfer scenario:
 
-<div align="center">
-  <img src="assets/transfer_animation.svg" alt="Animated File Transfer Chunk" width="100%" />
-</div>
+<details>
+  <summary><b>▶ Android to Linux</b></summary>
+  <div align="center">
+    <br/>
+    <img src="assets/anim_android_linux.svg" alt="Android to Linux Animation" width="100%" />
+  </div>
+</details>
+
+<details>
+  <summary><b>▶ Linux to Android</b></summary>
+  <div align="center">
+    <br/>
+    <img src="assets/anim_linux_android.svg" alt="Linux to Android Animation" width="100%" />
+  </div>
+</details>
+
+<details>
+  <summary><b>▶ Android to Android</b></summary>
+  <div align="center">
+    <br/>
+    <img src="assets/anim_android_android.svg" alt="Android to Android Animation" width="100%" />
+  </div>
+</details>
+
+<details>
+  <summary><b>▶ Linux to Linux</b></summary>
+  <div align="center">
+    <br/>
+    <img src="assets/anim_linux_linux.svg" alt="Linux to Linux Animation" width="100%" />
+  </div>
+</details>
 
 <br />
 
 ```mermaid
 sequenceDiagram
-    participant Linux as Linux Hardware
+    participant Source as Transfer Source
     participant Engine as C++ Engine
-    participant Android as Android Phone
+    participant Target as Transfer Target
 
-    Note over Linux,Android: 1. OOB Handshake Phase
-    Linux->>Android: Physical NFC Tap
-    Android-->>Linux: NDEF Payload (IP, Port)
+    Note over Source,Target: 1. OOB Handshake Phase
+    Source->>Target: Physical NFC Tap
+    Target-->>Source: NDEF Payload (IP, Port)
     
-    Note over Linux,Android: 2. Network Join Phase
-    Linux->>Linux: Connect to Hotspot (nmcli)
+    Note over Source,Target: 2. Network Join Phase
+    Source->>Source: Connect to Hotspot (nmcli/API)
     
-    Note over Linux,Android: 3. High-Speed TCP Transfer
-    Linux->>Engine: startTransfer(strategy)
-    Engine->>Android: TCP async_connect()
+    Note over Source,Target: 3. High-Speed TCP Transfer
+    Source->>Engine: startTransfer(strategy)
+    Engine->>Target: TCP async_connect()
     loop 64KB Chunk Streaming
-        Engine->>Android: async_write(binary_chunk)
-        Engine->>Linux: onProgress(percent)
+        Engine->>Target: async_write(binary_chunk)
+        Engine->>Source: onProgress(percent)
     end
-    Engine->>Android: Graceful Socket Shutdown
+    Engine->>Target: Graceful Socket Shutdown
 ```
 
-### 📄 Data Payload Specification (NDEF)
+### Data Payload Specification (NDEF)
 The NFC tap transmits a standard JSON payload formatted as an NDEF MIME-type (TNF 2) record to facilitate the zero-config connection:
 
 ```json
@@ -97,12 +125,12 @@ The NFC tap transmits a standard JSON payload formatted as an NDEF MIME-type (TN
 <div align="center"><img src="https://capsule-render.vercel.app/api?type=rect&color=00B894&height=4&width=300" /></div>
 <br />
 
-## 🛠️ 3. Technical Specifications & Requirements
+## 4. Technical Specifications & Requirements
 
 ### System Requirements
-* 🐧 **Linux Environment:** Debian/Ubuntu-based distribution.
-* 🤖 **Android Environment:** Physical Android device (Emulators do not support Wi-Fi Direct or NFC). Android 8.0 (API 26) or higher.
-* 🔌 **Hardware:** PN532 NFC/RFID module connected via USB/UART (set to HSU mode via DIP switches).
+* **Linux Environment:** Debian/Ubuntu-based distribution.
+* **Android Environment:** Physical Android device (Emulators do not support Wi-Fi Direct or NFC). Android 8.0 (API 26) or higher.
+* **Hardware:** PN532 NFC/RFID module connected via USB/UART (set to HSU mode via DIP switches).
 
 ### Software Dependencies
 | Category | Technology |
@@ -115,7 +143,7 @@ The NFC tap transmits a standard JSON payload formatted as an NDEF MIME-type (TN
 | **Mobile** | Android NDK, Java/Kotlin |
 
 
-### 🚀 Compilation & Integration
+### Compilation & Integration
 
 The project uses CMake to build a static library (`anyshare_engine`).
 
@@ -143,7 +171,7 @@ The project uses CMake to build a static library (`anyshare_engine`).
 </div>
 
 <div align="center">
-  <h2>👥 Project Contributors</h2>
+  <h2>Project Contributors</h2>
   <table align="center" width="80%">
     <tr>
       <td align="center" width="33%">
