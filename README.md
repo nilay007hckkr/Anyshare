@@ -1,6 +1,18 @@
-# AnyShare Network Engine
+<div align="center">
+  <a href="https://github.com/nilay007hckkr/Anyshare">
+    <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=800&size=45&pause=1000&color=00B894&center=true&vCenter=true&width=800&lines=AnyShare+Network+Engine;Cross-Platform+File+Transfer;High-Speed+Local+Sharing" alt="AnyShare Animated Title" />
+  </a>
 
-AnyShare is a cross-platform, asynchronous file transfer engine designed for high-speed local network sharing. It employs robust object-oriented principles to decouple the networking logic from the user interface and handover mechanisms, making it highly modular and scalable for cross-team development.
+  <br />
+  
+  <img src="https://img.shields.io/badge/C%2B%2B-17-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white" alt="C++17"/>
+  <img src="https://img.shields.io/badge/CMake-3.10%2B-064F8C?style=for-the-badge&logo=cmake&logoColor=white" alt="CMake"/>
+  <img src="https://img.shields.io/badge/Boost.Asio-1.74%2B-F3A622?style=for-the-badge&logo=boost&logoColor=white" alt="Boost"/>
+
+  <p><strong>A robust, modular engine decoupling networking from UI and Handover mechanisms.</strong></p>
+</div>
+
+<hr />
 
 ## Core Architecture
 
@@ -94,8 +106,15 @@ add_subdirectory(path/to/Anyshare)
 target_link_libraries(your_target PRIVATE anyshare_engine)
 ```
 
-## Contributors
+<hr />
 
-* Nilay Joshi - Core Network & Systems Engineer
-* Mayank Joshi - Desktop NFC & Hardware Specialist
-* Mohd Almas khan - Android Mobile & JNI Engineer
+<div align="center">
+  <h2>Contributors</h2>
+  <table align="center">
+    <tr>
+      <td align="center"><strong>Nilay Joshi</strong><br />Core Network & Systems Engineer</td>
+      <td align="center"><strong>Mayank Joshi</strong><br />Desktop NFC & Hardware Specialist</td>
+      <td align="center"><strong>Mohd Almas khan</strong><br />Android Mobile & JNI Engineer</td>
+    </tr>
+  </table>
+</div>
