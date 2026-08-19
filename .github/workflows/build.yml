@@ -1,0 +1,32 @@
+name: build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-core-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake libboost-all-dev nlohmann-json3-dev
+
+      - name: Configure CMake
+        run: |
+          cd core-engine
+          mkdir -p build
+          cd build
+          cmake ..
+
+      - name: Build
+        run: |
+          cd core-engine/build
+          make
