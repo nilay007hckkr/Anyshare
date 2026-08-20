@@ -2,13 +2,14 @@
   <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0984E3,00B894&height=200&section=header&text=AnyShare&fontSize=80&fontColor=ffffff" width="100%" />
 
   <br />
-  
+
   <a href="https://github.com/nilay007hckkr/Anyshare">
-    <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=700&size=28&pause=1000&color=2D3436&center=true&vCenter=true&width=800&lines=Hybrid+NFC+%26+Wi-Fi+Direct;True+Off-Grid+Alternative+to+AirDrop;High-Speed+Local+File+Transfer+System" alt="Typing Subtitle" />
+    <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=700&size=28&pause=1000&color=2D3436&center=true&vCenter=true&width=800&lines=Hybrid+NFC+%2B+Bluetooth+%26+Wi-Fi+Direct;True+Off-Grid+Local+File+Transfer;High-Speed%2C+Multi-File%2C+Checksum-Verified" alt="Typing Subtitle" />
   </a>
 
   <br />
-  
+
+  <img src="https://github.com/nilay007hckkr/Anyshare/actions/workflows/build.yml/badge.svg" alt="Build Status"/>
   <img src="https://img.shields.io/badge/C%2B%2B-17-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white" alt="C++17"/>
   <img src="https://img.shields.io/badge/CMake-3.10%2B-064F8C?style=for-the-badge&logo=cmake&logoColor=white" alt="CMake"/>
   <img src="https://img.shields.io/badge/Boost.Asio-1.74%2B-F3A622?style=for-the-badge&logo=boost&logoColor=white" alt="Boost"/>
@@ -21,9 +22,9 @@
 
 ## 1. Project Overview
 
-This project implements a high-performance, cross-platform, out-of-band (OOB) local file transfer system between Linux and Android devices. Designed as a true off-grid alternative to AirDrop, it utilizes Near Field Communication (NFC) for seamless, zero-configuration device discovery and Wi-Fi Direct (Ad-Hoc P2P) for high-speed data transfer.
+This project implements a high-performance, cross-platform, out-of-band (OOB) local file transfer system between Linux and Android devices. It fills a real gap: cloud transfer needs internet, Bluetooth alone is too slow for gigabyte-scale files, and most wireless transfer tools are locked inside a single vendor's ecosystem. AnyShare solves this with **NFC** (or a **Bluetooth fallback** when NFC hardware isn't available) for zero-configuration device discovery, and **Wi-Fi Direct** for the actual high-speed transfer.
 
-By leveraging a custom C++17 socket engine, the core file transfer logic is completely decoupled from the hardware and operating system constraints, ensuring high performance, zero memory bloat, and maximum code reusability across platforms.
+By leveraging a custom C++17 socket engine, the core file transfer logic is completely decoupled from the hardware and operating system, ensuring high performance, zero memory bloat, and maximum code reusability across platforms.
 
 <br />
 <div align="center"><img src="https://capsule-render.vercel.app/api?type=rect&color=00B894&height=4&width=300" /></div>
@@ -34,13 +35,14 @@ By leveraging a custom C++17 socket engine, the core file transfer logic is comp
 The project utilizes a True Wi-Fi Direct (P2P) topology for maximum throughput:
 
 * **Group Owner (Router):** The Host device acts as the Wi-Fi Direct Group Owner (GO), generating a temporary, hidden Wi-Fi network and assigning itself the static IP `192.168.49.1`.
-* **Client:** The Client machine receives the network credentials via NFC and connects to the hotspot using OS-level network managers.
+* **Client:** The Client machine receives the network credentials via NFC (or Bluetooth) and connects to the hotspot using OS-level network managers.
 * **Core Engine:** A shared C++ engine manages asynchronous TCP streams to transfer files over the established local network.
 
 ### 2.1 Design Patterns (GoF)
-* **Strategy Pattern (`INfcHandover`):** Abstracts the network credential exchange mechanism. Allows the core engine to function identically regardless of whether the handover occurs via a physical PN532 module on Linux or native Android APIs.
+* **Strategy Pattern (`INfcHandover`):** Abstracts the credential-exchange mechanism. The engine works identically whether the handover came from a physical PN532 module on Linux, native Android NFC APIs, or a Bluetooth RFCOMM fallback when NFC hardware isn't detected.
+* **Factory Pattern:** Sits between the hardware-compatibility check and the engine — selects which concrete `INfcHandover` strategy to construct (NFC vs. Bluetooth) based on what the device actually has available.
 * **Adapter Pattern:** Encapsulates low-level C libraries (`libnfc`) into modern C++ smart pointers to prevent memory leaks and provide an object-oriented interface.
-* **Observer Pattern (`IProgressObserver`):** Decouples the background network threading from the UI, allowing asynchronous progress updates (0-100%) without blocking the data stream.
+* **Observer Pattern (`IProgressObserver`):** Decouples the background network thread from the UI, allowing asynchronous progress updates (0-100%) and error reporting without blocking the data stream.
 
 <br />
 <div align="center"><img src="https://capsule-render.vercel.app/api?type=rect&color=0984E3&height=4&width=300" /></div>
@@ -48,7 +50,7 @@ The project utilizes a True Wi-Fi Direct (P2P) topology for maximum throughput:
 
 ## 3. Dynamic Transfer Workflow (Under the Hood)
 
-Here is a deep dive into the actual file transfer animations across all supported platform combinations. Click to expand each transfer scenario:
+Here is a deep dive into the actual file transfer flow across all supported platform combinations. Click to expand each transfer scenario:
 
 <details>
   <summary><b>▶ Android to Linux</b></summary>
@@ -86,29 +88,36 @@ Here is a deep dive into the actual file transfer animations across all supporte
 
 ```mermaid
 sequenceDiagram
-    participant Source as Transfer Source
-    participant Engine as C++ Engine
-    participant Target as Transfer Target
+    participant U as User
+    participant H as NFC / Bluetooth Handover
+    participant Engine as Core C++ Engine
+    participant Target as Remote Device
 
-    Note over Source,Target: 1. OOB Handshake Phase
-    Source->>Target: Physical NFC Tap
-    Target-->>Source: NDEF Payload (IP, Port)
-    
-    Note over Source,Target: 2. Network Join Phase
-    Source->>Source: Connect to Hotspot (nmcli/API)
-    
-    Note over Source,Target: 3. High-Speed TCP Transfer
-    Source->>Engine: startTransfer(strategy)
-    Engine->>Target: TCP async_connect()
-    loop 64KB Chunk Streaming
-        Engine->>Target: async_write(binary_chunk)
-        Engine->>Source: onProgress(percent)
+    U->>H: Physical tap (Bluetooth used if NFC unavailable)
+    H-->>Engine: Raw JSON payload (SSID, PSK, IP, Port, Files[])
+    Engine->>Engine: Parse payload into ConnectionInfo
+
+    loop Non-blocking connect, 2s retry, up to 60s
+        Engine->>Target: async_connect()
     end
-    Engine->>Target: Graceful Socket Shutdown
+    Target-->>Engine: Connection established
+
+    loop For each file in Files[]
+        loop 64KB chunk streaming
+            Engine->>Target: async_write(chunk)
+            Engine->>U: onProgress(percent)
+        end
+        Engine->>Engine: Verify CRC32 checksum
+        alt Connection drops mid-transfer
+            Engine->>Target: Reconnect and retry this file, up to 3x
+        end
+    end
+
+    Engine->>U: Session complete
 ```
 
-### Data Payload Specification (NDEF)
-The NFC tap transmits a standard JSON payload formatted as an NDEF MIME-type (TNF 2) record to facilitate the zero-config connection:
+### Data Payload Specification (NDEF / Bluetooth JSON)
+The handover layer transmits a JSON payload carrying connection credentials and a list of one or more files to send:
 
 ```json
 {
@@ -116,8 +125,14 @@ The NFC tap transmits a standard JSON payload formatted as an NDEF MIME-type (TN
   "psk": "GeneratedPassword123",
   "ip": "192.168.49.1",
   "port": 8080,
-  "filename": "heavy_presentation.mp4",
-  "filesize": 2147483648
+  "files": [
+    {
+      "filename": "heavy_presentation.mp4",
+      "mimeType": "video/mp4",
+      "filesize": 2147483648,
+      "checksum": "a1b2c3d4"
+    }
+  ]
 }
 ```
 
@@ -125,12 +140,28 @@ The NFC tap transmits a standard JSON payload formatted as an NDEF MIME-type (TN
 <div align="center"><img src="https://capsule-render.vercel.app/api?type=rect&color=00B894&height=4&width=300" /></div>
 <br />
 
-## 4. Technical Specifications & Requirements
+## 4. Verified Performance
+
+The core engine has been stress-tested against a real 2GB file, with memory measured using `/usr/bin/time -v` rather than estimated:
+
+| Metric | Result |
+| :--- | :--- |
+| File size streamed | 2,147,483,648 bytes (2.0 GB) |
+| Peak RAM used | **~4 MB** |
+| Byte-for-byte correctness | Confirmed identical (`diff`) |
+| Checksum verification | Passed (CRC32) |
+| Mid-transfer disconnect recovery | Confirmed — automatic reconnect and retry, up to 3 attempts per file |
+
+<br />
+<div align="center"><img src="https://capsule-render.vercel.app/api?type=rect&color=0984E3&height=4&width=300" /></div>
+<br />
+
+## 5. Technical Specifications & Requirements
 
 ### System Requirements
 * **Linux Environment:** Debian/Ubuntu-based distribution.
 * **Android Environment:** Physical Android device (Emulators do not support Wi-Fi Direct or NFC). Android 8.0 (API 26) or higher.
-* **Hardware:** PN532 NFC/RFID module connected via USB/UART (set to HSU mode via DIP switches).
+* **Hardware:** PN532 NFC/RFID module connected via USB/UART (set to HSU mode via DIP switches), or Bluetooth as a fallback.
 
 ### Software Dependencies
 | Category | Technology |
@@ -138,32 +169,33 @@ The NFC tap transmits a standard JSON payload formatted as an NDEF MIME-type (TN
 | **Standard** | C++17 |
 | **Build System** | CMake 3.10+ |
 | **Networking** | `Boost.Asio` |
+| **JSON Parsing** | `nlohmann/json` |
 | **Hardware Drivers** | `libnfc` |
 | **OS Network Manager** | `nmcli` (NetworkManager) |
 | **Mobile** | Android NDK, Java/Kotlin |
 
-
 ### Compilation & Integration
 
-The project uses CMake to build a static library (`anyshare_engine`).
+The engine lives in `core-engine/` and builds as a static library (`core_engine`).
 
-1. **Clone & Configure:**
-   ```bash
+1. **Clone & configure:**
+```bash
    git clone https://github.com/nilay007hckkr/Anyshare.git
-   cd Anyshare && mkdir build && cd build
+   cd Anyshare/core-engine
+   mkdir build && cd build
    cmake ..
-   ```
+```
 
 2. **Build the engine:**
-   ```bash
+```bash
    cmake --build .
-   ```
+```
 
-3. **Integrate into your CMake project:**
-   ```cmake
-   add_subdirectory(path/to/Anyshare)
-   target_link_libraries(your_target PRIVATE anyshare_engine)
-   ```
+3. **Integrate into your own CMake project:**
+```cmake
+   add_subdirectory(path/to/Anyshare/core-engine)
+   target_link_libraries(your_target PRIVATE core_engine)
+```
 
 <br />
 <div align="center">
