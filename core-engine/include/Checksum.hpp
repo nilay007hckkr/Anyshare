@@ -1,43 +1,77 @@
 #pragma once
 
-#include <cstdint>
+#include <array>
 #include <cstddef>
-#include <sstream>
-#include <iomanip>
+#include <cstdint>
+#include <cstdio>
+#include <string>
 
+// CRC-32 (IEEE 802.3, reflected polynomial 0xEDB88320) -- identical values to
+// zlib's crc32() and java.util.zip.CRC32. Slicing-by-8 keeps checksumming far
+// faster than any wireless link so it never becomes the transfer bottleneck.
+//
+// CRC-32 detects accidental corruption; it is not a defence against a
+// deliberate attacker (that is the job of the transport's link encryption).
 class Crc32Calculator {
 private:
-    uint32_t crc_ = 0xFFFFFFFF;
-    inline static uint32_t table_[256];
-    inline static bool tableInitialized_ = false;
+    using Table = std::array<std::array<uint32_t, 256>, 8>;
 
-    static void initTable() {
-        for (uint32_t i = 0; i < 256; ++i) {
-            uint32_t c = i;
-            for (int j = 0; j < 8; ++j) {
-                c = (c & 1) ? (0xEDB88320 ^ (c >> 1)) : (c >> 1);
+    // Function-local static: initialised exactly once, thread-safe (C++11).
+    static const Table& tables() {
+        static const Table table = [] {
+            Table t{};
+            for (uint32_t i = 0; i < 256; ++i) {
+                uint32_t c = i;
+                for (int j = 0; j < 8; ++j) {
+                    c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+                }
+                t[0][i] = c;
             }
-            table_[i] = c;
-        }
-        tableInitialized_ = true;
+            for (uint32_t i = 0; i < 256; ++i) {
+                for (int s = 1; s < 8; ++s) {
+                    t[s][i] = (t[s - 1][i] >> 8) ^ t[0][t[s - 1][i] & 0xFF];
+                }
+            }
+            return t;
+        }();
+        return table;
     }
+
+    uint32_t crc_ = 0xFFFFFFFFu;
 
 public:
-    Crc32Calculator() {
-        if (!tableInitialized_) initTable();
-    }
-
     void update(const char* data, size_t length) {
-        for (size_t i = 0; i < length; ++i) {
-            uint8_t byte = static_cast<uint8_t>(data[i]);
-            crc_ = table_[(crc_ ^ byte) & 0xFF] ^ (crc_ >> 8);
-        }
+        update(reinterpret_cast<const uint8_t*>(data), length);
     }
 
-    std::string getHexValue() const {
-        uint32_t finalCrc = crc_ ^ 0xFFFFFFFF;
-        std::stringstream ss;
-        ss << std::hex << std::setfill('0') << std::setw(8) << finalCrc;
-        return ss.str();
+    void update(const uint8_t* p, size_t length) {
+        const Table& t = tables();
+        uint32_t c = crc_;
+        while (length >= 8) {
+            uint32_t lo = c ^ (uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
+                               (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24));
+            uint32_t hi = uint32_t(p[4]) | (uint32_t(p[5]) << 8) |
+                          (uint32_t(p[6]) << 16) | (uint32_t(p[7]) << 24);
+            c = t[7][lo & 0xFF] ^ t[6][(lo >> 8) & 0xFF] ^
+                t[5][(lo >> 16) & 0xFF] ^ t[4][lo >> 24] ^
+                t[3][hi & 0xFF] ^ t[2][(hi >> 8) & 0xFF] ^
+                t[1][(hi >> 16) & 0xFF] ^ t[0][hi >> 24];
+            p += 8;
+            length -= 8;
+        }
+        while (length--) {
+            c = t[0][(c ^ *p++) & 0xFF] ^ (c >> 8);
+        }
+        crc_ = c;
+    }
+
+    uint32_t value() const { return crc_ ^ 0xFFFFFFFFu; }
+
+    std::string getHexValue() const { return toHex(value()); }
+
+    static std::string toHex(uint32_t crc) {
+        char text[9];
+        std::snprintf(text, sizeof(text), "%08x", static_cast<unsigned>(crc));
+        return text;
     }
 };

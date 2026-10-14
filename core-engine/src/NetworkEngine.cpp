@@ -1,215 +1,214 @@
 #include "NetworkEngine.hpp"
-#include <iostream>
 
-NetworkEngine::NetworkEngine()
-    : socket_(io_context_), retryTimer_(io_context_) {}
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+#include "SocketStream.hpp"
+
+// Re-bases progress from each (re)connection attempt onto the whole job so
+// observers see one monotonic 0-100% session even across reconnects.
+class NetworkEngine::Fanout : public IProgressObserver {
+public:
+    explicit Fanout(std::vector<IProgressObserver*>& observers) : observers_(observers) {}
+
+    void beginJob(std::size_t fileCount, uint64_t totalBytes) {
+        fileCount_ = fileCount;
+        totalBytes_ = totalBytes;
+        baseIndex_ = 0;
+        baseBytes_ = 0;
+        lastPercent_ = -1;
+        started_ = false;
+    }
+    void setBase(std::size_t index, uint64_t bytes) {
+        baseIndex_ = index;
+        baseBytes_ = bytes;
+    }
+
+    void onProgress(int) override {}   // recomputed from bytes below
+    void onError(const std::string& message) override {
+        for (auto* o : observers_) o->onError(message);
+    }
+    void onSessionStarted(std::size_t, uint64_t) override {
+        if (started_) return;
+        started_ = true;
+        for (auto* o : observers_) o->onSessionStarted(fileCount_, totalBytes_);
+    }
+    void onFileStarted(std::size_t index, const std::string& name, uint64_t size) override {
+        for (auto* o : observers_) o->onFileStarted(baseIndex_ + index, name, size);
+    }
+    void onBytesTransferred(uint64_t sessionBytes, uint64_t) override {
+        uint64_t done = baseBytes_ + sessionBytes;
+        int percent = totalBytes_ == 0 ? 100 : static_cast<int>((done * 100) / totalBytes_);
+        for (auto* o : observers_) o->onBytesTransferred(done, totalBytes_);
+        if (percent != lastPercent_) {
+            lastPercent_ = percent;
+            for (auto* o : observers_) o->onProgress(percent);
+        }
+    }
+    void onFileCompleted(std::size_t index, const std::string& name, const std::string& path, bool verified) override {
+        for (auto* o : observers_) o->onFileCompleted(baseIndex_ + index, name, path, verified);
+    }
+    void onSessionFinished(bool, const std::string&) override {}   // the engine reports the final outcome
+
+private:
+    std::vector<IProgressObserver*>& observers_;
+    std::size_t fileCount_ = 0;
+    uint64_t totalBytes_ = 0;
+    std::size_t baseIndex_ = 0;
+    uint64_t baseBytes_ = 0;
+    int lastPercent_ = -1;
+    bool started_ = false;
+};
+
+NetworkEngine::NetworkEngine() : fanout_(std::make_unique<Fanout>(observers_)) {
+    streamFactory_ = [](const ConnectionInfo& info, int timeoutMs) -> std::unique_ptr<IByteStream> {
+        if (info.transport == "tcp") {
+            if (info.ip.empty() || info.port == 0) throw TransportError("no TCP address in connection info");
+            return anyshare::connectTcp(info.ip, info.port, timeoutMs);
+        }
+        throw TransportError("transport '" + info.transport + "' is not available in this build");
+    };
+}
+
+NetworkEngine::~NetworkEngine() = default;
 
 void NetworkEngine::addObserver(IProgressObserver* observer) {
-    observers_.push_back(observer);
+    if (observer) observers_.push_back(observer);
 }
 
-void NetworkEngine::notifyObservers(int percent) {
-    for (IProgressObserver* observer : observers_) {
-        observer->onProgress(percent);
+void NetworkEngine::cancel() {
+    cancel_.cancel();
+    std::lock_guard<std::mutex> lock(streamMutex_);
+    if (activeStream_) activeStream_->abort();
+}
+
+bool NetworkEngine::sleepCancellable(int seconds) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (cancel_.isCancelled()) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
+    return !cancel_.isCancelled();
 }
 
-void NetworkEngine::notifyObserversError(const std::string& message) {
-    for (IProgressObserver* observer : observers_) {
-        observer->onError(message);
-    }
+void NetworkEngine::report(bool success, const std::string& message) {
+    lastSucceeded_ = success;
+    lastMessage_ = message;
+    for (auto* o : observers_) o->onSessionFinished(success, message);
 }
 
-void NetworkEngine::attemptConnect() {
-    try {
-        boost::asio::ip::tcp::endpoint endpoint(
-            boost::asio::ip::make_address(connectionInfo_.ip),
-            connectionInfo_.port
-        );
-
-        socket_.async_connect(endpoint,
-            [this](const boost::system::error_code& error) {
-                handleConnectResult(error);
-            });
-    } catch (const std::exception& e) {
-        abortTransfer(std::string("Invalid connection info: ") + e.what());
-    }
-}
-
-void NetworkEngine::handleConnectResult(const boost::system::error_code& error) {
-    if (!error) {
-        std::cout << "Connected successfully to "
-                  << connectionInfo_.ip << ":" << connectionInfo_.port << std::endl;
-
-        if (isResumingFile_) {
-            isResumingFile_ = false;
-            openAndBeginCurrentFile();
-        } else {
-            startNextFile();
+std::unique_ptr<IByteStream> NetworkEngine::connectWithRetry(const ConnectionInfo& info) {
+    auto start = std::chrono::steady_clock::now();
+    auto deadline = start + std::chrono::seconds(connectTimeoutSeconds_);
+    for (int attempt = 1;; ++attempt) {
+        if (cancel_.isCancelled()) return nullptr;
+        auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+        int timeoutMs = static_cast<int>(std::max<long long>(1000, std::min<long long>(left.count(), 10000)));
+        try {
+            auto stream = streamFactory_(info, timeoutMs);
+            std::cout << "Connected via " << stream->describe() << std::endl;
+            return stream;
+        } catch (const TransportError& e) {
+            if (cancel_.isCancelled()) return nullptr;
+            if (std::chrono::steady_clock::now() + std::chrono::seconds(retryDelaySeconds_) > deadline) {
+                fanout_->onError("Connection failed permanently after " + std::to_string(connectTimeoutSeconds_) +
+                                 " seconds: " + e.what());
+                return nullptr;
+            }
+            std::cerr << "Connect attempt " << attempt << " failed (" << e.what() << "). Retrying in "
+                      << retryDelaySeconds_ << "s..." << std::endl;
+            if (!sleepCancellable(retryDelaySeconds_)) return nullptr;
         }
-        return;
     }
-
-    auto elapsed = std::chrono::steady_clock::now() - connectStartTime_;
-    if (elapsed > std::chrono::seconds(MAX_CONNECT_TIMEOUT_SECONDS)) {
-        abortTransfer("Connection failed permanently after " +
-                       std::to_string(MAX_CONNECT_TIMEOUT_SECONDS) + " seconds");
-        return;
-    }
-
-    std::cerr << "Connect attempt failed (" << error.message()
-              << "). Retrying in " << RETRY_DELAY_SECONDS << "s..." << std::endl;
-
-    retryTimer_.expires_after(std::chrono::seconds(RETRY_DELAY_SECONDS));
-    retryTimer_.async_wait([this](const boost::system::error_code& timerError) {
-        if (!timerError) {
-            socket_.close();
-            attemptConnect();
-        }
-    });
-}
-
-void NetworkEngine::startNextFile() {
-    if (currentFileIndex_ >= connectionInfo_.files.size()) {
-        std::cout << "All files sent. Session complete." << std::endl;
-        return;
-    }
-
-    fileRetryCount_ = 0;
-    openAndBeginCurrentFile();
-}
-
-void NetworkEngine::openAndBeginCurrentFile() {
-    const FileMetadata& file = connectionInfo_.files[currentFileIndex_];
-
-    sourceFile_.open(file.filename, std::ios::binary);
-    if (!sourceFile_.is_open()) {
-        notifyObserversError("Failed to open file: " + file.filename);
-        currentFileIndex_++;
-        startNextFile();
-        return;
-    }
-
-    bytesTransferredThisFile_ = 0;
-    lastReportedPercent_ = -1;
-    currentFileChecksum_ = Crc32Calculator();
-
-    std::cout << "Sending file " << (currentFileIndex_ + 1) << "/"
-              << connectionInfo_.files.size() << ": " << file.filename << std::endl;
-
-    sendNextChunk();
-}
-
-void NetworkEngine::sendNextChunk() {
-    sourceFile_.read(buffer_.data(), buffer_.size());
-    std::streamsize bytesRead = sourceFile_.gcount();
-
-    if (bytesRead <= 0) {
-        finishCurrentFile();
-        return;
-    }
-
-    currentFileChecksum_.update(buffer_.data(), static_cast<size_t>(bytesRead));
-
-    boost::asio::async_write(socket_, boost::asio::buffer(buffer_.data(), bytesRead),
-        [this](const boost::system::error_code& error, std::size_t bytesWritten) {
-            handleWriteResult(error, bytesWritten);
-        });
-}
-
-void NetworkEngine::handleWriteResult(const boost::system::error_code& error, std::size_t bytesWritten) {
-    if (error) {
-        handleTransferError("Write failed: " + error.message());
-        return;
-    }
-
-    bytesTransferredThisFile_ += bytesWritten;
-
-    const FileMetadata& file = connectionInfo_.files[currentFileIndex_];
-    int percent = static_cast<int>((bytesTransferredThisFile_ * 100) / file.filesize);
-
-    if (percent != lastReportedPercent_) {
-        lastReportedPercent_ = percent;
-        notifyObservers(percent);
-    }
-
-    sendNextChunk();
-}
-
-void NetworkEngine::handleTransferError(const std::string& reason) {
-    fileRetryCount_++;
-
-    if (fileRetryCount_ > MAX_FILE_RETRIES) {
-        abortTransfer(reason + " -- giving up after " + std::to_string(MAX_FILE_RETRIES) + " retries");
-        return;
-    }
-
-    notifyObserversError(reason + ". Retrying file from the start (attempt " +
-                          std::to_string(fileRetryCount_) + "/" +
-                          std::to_string(MAX_FILE_RETRIES) + ") in " +
-                          std::to_string(RETRY_DELAY_SECONDS) + "s...");
-
-    if (sourceFile_.is_open()) {
-        sourceFile_.close();
-    }
-    boost::system::error_code ignored;
-    socket_.close(ignored);
-
-    isResumingFile_ = true;
-
-    retryTimer_.expires_after(std::chrono::seconds(RETRY_DELAY_SECONDS));
-    retryTimer_.async_wait([this](const boost::system::error_code& timerError) {
-        if (!timerError) {
-            connectStartTime_ = std::chrono::steady_clock::now();
-            attemptConnect();
-        }
-    });
-}
-
-void NetworkEngine::finishCurrentFile() {
-    sourceFile_.close();
-
-    const FileMetadata& file = connectionInfo_.files[currentFileIndex_];
-    std::string computedChecksum = currentFileChecksum_.getHexValue();
-
-    if (computedChecksum == file.checksum) {
-        std::cout << "Verified OK: " << file.filename
-                  << " (checksum " << computedChecksum << ")" << std::endl;
-    } else {
-        notifyObserversError("Checksum mismatch for " + file.filename +
-                              " -- expected " + file.checksum +
-                              ", got " + computedChecksum);
-    }
-
-    currentFileIndex_++;
-    startNextFile();
-}
-
-void NetworkEngine::abortTransfer(const std::string& reason) {
-    boost::system::error_code ignored;
-    socket_.close(ignored);
-
-    if (sourceFile_.is_open()) {
-        sourceFile_.close();
-    }
-
-    notifyObserversError(reason);
 }
 
 void NetworkEngine::connectToHost(const ConnectionInfo& info) {
-    connectionInfo_ = info;
-    currentFileIndex_ = 0;
-    connectStartTime_ = std::chrono::steady_clock::now();
-    attemptConnect();
-    io_context_.run();
+    cancel_.reset();
+    lastSucceeded_ = false;
+    lastTransport_.clear();
+
+    // Validate every file before touching the network, so a typo never
+    // results in a partially delivered set.
+    std::vector<anyshare::OutgoingFile> files;
+    uint64_t totalBytes = 0;
+    for (const auto& meta : info.files) {
+        try {
+            files.push_back(anyshare::outgoingFileFromPath(meta.filename, meta.mimeType, meta.checksum));
+            totalBytes += files.back().size;
+        } catch (const std::exception& e) {
+            std::string message = std::string("Failed to open file: ") + e.what();
+            fanout_->onError(message);
+            report(false, message);
+            return;
+        }
+    }
+    if (files.empty()) {
+        report(false, "No files to send");
+        return;
+    }
+    fanout_->beginJob(files.size(), totalBytes);
+
+    std::size_t done = 0;
+    uint64_t doneBytes = 0;
+    for (int retry = 0;; ++retry) {
+        auto stream = connectWithRetry(info);
+        if (!stream) {
+            report(false, cancel_.isCancelled() ? "Cancelled" : "Could not connect to receiver");
+            return;
+        }
+        lastTransport_ = stream->describe();
+        {
+            std::lock_guard<std::mutex> lock(streamMutex_);
+            activeStream_ = stream.get();
+        }
+
+        std::vector<anyshare::OutgoingFile> remaining(files.begin() + static_cast<std::ptrdiff_t>(done), files.end());
+        fanout_->setBase(done, doneBytes);
+        anyshare::SendOptions options;
+        options.senderName = senderName_;
+        options.token = info.sessionToken;
+        anyshare::SendResult result = anyshare::sendFiles(*stream, remaining, options, fanout_.get(), &cancel_);
+
+        {
+            std::lock_guard<std::mutex> lock(streamMutex_);
+            activeStream_ = nullptr;
+        }
+        for (std::size_t i = 0; i < result.filesCompleted; ++i) doneBytes += files[done + i].size;
+        done += result.filesCompleted;
+
+        if (result.status == anyshare::TransferStatus::Success) {
+            report(true, "All " + std::to_string(files.size()) + " file(s) delivered and verified via " + lastTransport_);
+            return;
+        }
+        if (!result.retryable() || cancel_.isCancelled()) {
+            report(false, result.message);
+            return;
+        }
+        if (retry + 1 > MAX_FILE_RETRIES) {
+            report(false, result.message + " -- giving up after " + std::to_string(MAX_FILE_RETRIES) + " retries");
+            return;
+        }
+        fanout_->onError("Reconnecting to resend " + std::to_string(files.size() - done) + " unconfirmed file(s) (attempt " +
+                         std::to_string(retry + 1) + "/" + std::to_string(MAX_FILE_RETRIES) + ")");
+        if (!sleepCancellable(retryDelaySeconds_)) {
+            report(false, "Cancelled");
+            return;
+        }
+    }
 }
 
 void NetworkEngine::startTransfer(std::unique_ptr<INfcHandover> handoverStrategy) {
-    std::cout << "Requesting connection info via handover strategy..." << std::endl;
+    std::cout << "Requesting connection info via " << handoverStrategy->describe() << "..." << std::endl;
+    ConnectionInfo info;
     try {
-        ConnectionInfo info = handoverStrategy->performHandover();
-        connectToHost(info);
+        info = handoverStrategy->performHandover();
     } catch (const std::exception& e) {
-        notifyObserversError(std::string("Handover failed: ") + e.what());
+        std::string message = std::string("Handover failed: ") + e.what();
+        fanout_->onError(message);
+        report(false, message);
+        return;
     }
+    connectToHost(info);
 }

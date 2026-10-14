@@ -5,6 +5,8 @@
 
 class BluetoothHandover : public INfcHandover {
 public:
+    std::string describe() const override { return "simulated handover (hardcoded test values; no Bluetooth used)"; }
+
     ConnectionInfo performHandover() override {
         std::cout << "[BluetoothHandover] Simulating Bluetooth RFCOMM pairing..." << std::endl;
 

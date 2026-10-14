@@ -5,6 +5,8 @@
 
 class LargeFileTestHandover : public INfcHandover {
 public:
+    std::string describe() const override { return "simulated handover (hardcoded 2 GB stress-test values)"; }
+
     ConnectionInfo performHandover() override {
         std::cout << "[LargeFileTestHandover] Preparing 2GB stress test..." << std::endl;
 

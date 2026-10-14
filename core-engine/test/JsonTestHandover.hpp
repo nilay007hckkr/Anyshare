@@ -6,6 +6,8 @@
 
 class JsonTestHandover : public INfcHandover {
 public:
+    std::string describe() const override { return "simulated tap (hardcoded JSON payload; no NFC used)"; }
+
     ConnectionInfo performHandover() override {
         std::cout << "[JsonTestHandover] Simulating raw JSON payload received via tap..." << std::endl;
 
