@@ -1,0 +1,51 @@
+<svg width="800" height="250" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3DDC84;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FCC624;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="chunkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0984e3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#74b9ff;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="250" fill="#1e1e1e" rx="15" />
+
+  <!-- Track -->
+  <rect x="230" y="123" width="340" height="4" fill="url(#grad1)" opacity="0.3" rx="2" />
+
+  <!-- Android (GO) -->
+  <g transform="translate(100, 60)">
+    <rect width="100" height="100" fill="#2d2d2d" stroke="#3DDC84" stroke-width="2" rx="15" />
+    <text x="50" y="65" font-family="Arial" font-size="45" text-anchor="middle" fill="#fff">📱</text>
+    <text x="50" y="130" font-family="Segoe UI, Tahoma, sans-serif" font-size="16" fill="#fff" text-anchor="middle" font-weight="bold">Android (GO)</text>
+    <text x="50" y="150" font-family="Segoe UI, Tahoma, sans-serif" font-size="12" fill="#888" text-anchor="middle">192.168.49.1</text>
+  </g>
+
+  <!-- Linux (Client) -->
+  <g transform="translate(600, 60)">
+    <rect width="100" height="100" fill="#2d2d2d" stroke="#FCC624" stroke-width="2" rx="15" />
+    <text x="50" y="65" font-family="Arial" font-size="45" text-anchor="middle" fill="#fff">💻</text>
+    <text x="50" y="130" font-family="Segoe UI, Tahoma, sans-serif" font-size="16" fill="#fff" text-anchor="middle" font-weight="bold">Linux (Client)</text>
+    <text x="50" y="150" font-family="Segoe UI, Tahoma, sans-serif" font-size="12" fill="#888" text-anchor="middle">Hardware</text>
+  </g>
+
+  <!-- Chunk -->
+  <g id="chunk">
+    <rect x="200" y="112" width="60" height="26" fill="url(#chunkGrad)" rx="5" />
+    <text x="230" y="130" font-family="Segoe UI, Tahoma, sans-serif" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">64KB</text>
+    
+    <style>
+      #chunk {
+        animation: move 1.5s infinite ease-in-out;
+      }
+      @keyframes move {
+        0% { transform: translateX(0) scale(0.5); opacity: 0; }
+        15% { opacity: 1; transform: translateX(40px) scale(1); }
+        85% { opacity: 1; transform: translateX(360px) scale(1); }
+        100% { transform: translateX(400px) scale(0.5); opacity: 0; }
+      }
+    </style>
+  </g>
+</svg>
