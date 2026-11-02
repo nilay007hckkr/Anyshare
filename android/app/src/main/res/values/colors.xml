@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand (indigo) and neutrals -->
+    <color name="primary">#4F46E5</color>
+    <color name="primary_variant">#4338CA</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="secondary">#0EA5E9</color>
+    <color name="background">#F6F7FB</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#F1F3F9</color>
+    <color name="surface_stroke">#E5E7EB</color>
+    <color name="text_primary">#111827</color>
+    <color name="text_secondary">#6B7280</color>
+    <color name="badge_bg">#EEF2FF</color>
+    <color name="badge_text">#4338CA</color>
+    <color name="success">#10B981</color>
+    <color name="pulse">#818CF8</color>
+
+    <!-- Transfer states: same colours as the ESP32 status LED -->
+    <color name="state_send">#7C3AED</color>
+    <color name="state_receive">#E11D48</color>
+    <color name="state_done">#10B981</color>
+    <color name="state_error">#F59E0B</color>
+</resources>

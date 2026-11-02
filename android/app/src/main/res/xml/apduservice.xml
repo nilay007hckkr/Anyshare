@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AID must match ApduProtocol.AID_HEX and protocol::kHceAidHex. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/hce_service_description"
+    android:requireDeviceUnlock="false">
+    <aid-group
+        android:category="other"
+        android:description="@string/hce_aid_group">
+        <aid-filter android:name="F0414E59534852" />
+    </aid-group>
+</host-apdu-service>
