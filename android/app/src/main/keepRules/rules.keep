@@ -1,0 +1,15 @@
+# Add project specific R8 rules here.
+# AGP will combine all keep rule files in src/main/keepRules to pass to R8
+#
+# For more details, see
+#   https://d.android.com/r/tools/r8/keep-rules
+
+# JNI: native methods, and the Java members that native code looks up by name.
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+-keep class com.example.myapplication.transfer.NativeBridge$Result {
+    <init>(int, java.lang.String, int, boolean, java.lang.String);
+}
+-keep interface com.example.myapplication.transfer.NativeBridge$Callbacks { *; }
+-keepclassmembers class * implements com.example.myapplication.transfer.NativeBridge$Callbacks { *; }

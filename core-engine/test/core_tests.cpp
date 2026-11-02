@@ -208,17 +208,20 @@ static void testSanitize() {
 }
 
 static void testHandoverParser() {
-    auto mainSchema = parseConnectionInfo(R"({"ssid":"DIRECT-xy","psk":"pw","ip":"192.168.49.1","port":8080,
+    auto mainSchema = parseConnectionInfo(R"({"ssid":"DIRECT-xy","psk":"pw123456","ip":"192.168.49.1","port":8080,
         "files":[{"filename":"a.mp4","mimeType":"video/mp4","filesize":10,"checksum":"a1b2c3d4"}]})");
     CHECK_EQ(mainSchema.transport, std::string("tcp"));
     CHECK_EQ(mainSchema.port, 8080);
     CHECK_EQ(mainSchema.files.size(), 1u);
     CHECK_EQ(mainSchema.files[0].checksum, std::string("a1b2c3d4"));
 
-    auto legacy = parseConnectionInfo(R"({"ssid":"s","psk":"p","ip":"192.168.49.1","port":8080,
+    auto legacy = parseConnectionInfo(R"({"ssid":"s","psk":"p4ssword","ip":"192.168.49.1","port":8080,
         "filename":"x.bin","filesize":42})");
     CHECK_EQ(legacy.files.size(), 1u);
     CHECK_EQ(legacy.files[0].filesize, 42u);
+    // Older payloads had no "hip": the group owner's address was "ip".
+    CHECK(legacy.hostsNetwork());
+    CHECK_EQ(legacy.addressOnHostedNetwork(), std::string("192.168.49.1"));
 
     auto bt = parseConnectionInfo(R"({"v":1,"transport":"rfcomm","name":"Pixel 7","token":"abcd"})");
     CHECK_EQ(bt.transport, std::string("rfcomm"));
@@ -262,6 +265,59 @@ static void testHandoverParser() {
     CHECK_EQ(bt.role, std::string("receive"));
     CHECK(throwsWith([] { parseConnectionInfo(R"({"role":"steal","ip":"1.2.3.4","port":1})"); }, "Unsupported role"));
     CHECK(throwsWith([] { parseConnectionInfo(R"({"role":"send","ip":"1.2.3.4","port":1})"); }, "must publish a token"));
+}
+
+// A phone that hosts its own Wi-Fi network (Wi-Fi Direct group / local-only hotspot) adds
+// ssid + psk + hip, so a laptop with no shared network can join it.
+static void testHostedNetworkPayload() {
+    auto hosted = parseConnectionInfo(
+        R"({"v":1,"role":"send","transport":"tcp","ip":"192.168.1.23","port":40123,"name":"Galaxy M34 5G",)"
+        R"("token":"0123456789abcdef","ssid":"DIRECT-ab-AnyShare","psk":"k7m2p9q4x8w3r6t5","hip":"192.168.49.1"})");
+    CHECK(hosted.hostsNetwork());
+    CHECK_EQ(hosted.ssid, std::string("DIRECT-ab-AnyShare"));
+    CHECK_EQ(hosted.psk, std::string("k7m2p9q4x8w3r6t5"));
+    CHECK_EQ(hosted.hostedIp, std::string("192.168.49.1"));
+    CHECK_EQ(hosted.addressOnHostedNetwork(), std::string("192.168.49.1"));
+    CHECK_EQ(hosted.ip, std::string("192.168.1.23"));   // the shared-LAN address stays separate
+    std::string again = connectionInfoToJson(hosted);
+    auto back = parseConnectionInfo(again);
+    CHECK_EQ(back.hostedIp, hosted.hostedIp);
+    CHECK_EQ(back.psk, hosted.psk);
+    CHECK(again.size() <= 250);   // Android's HCE payload limit (ApduProtocol.MAX_PAYLOAD_BYTES)
+
+    // Open network (no psk), rfcomm payload with a Wi-Fi alternative, raw 64-hex key.
+    auto open = parseConnectionInfo(R"({"v":1,"transport":"rfcomm","name":"P","port":9,"ssid":"Open net","hip":"10.4.0.1"})");
+    CHECK(open.hostsNetwork() && open.psk.empty());
+    CHECK(parseConnectionInfo(std::string(R"({"ip":"10.0.0.1","port":1,"ssid":"x","psk":")") +
+                              std::string(64, 'a') + R"("})").psk.size() == 64);
+    auto noNetwork = parseConnectionInfo(R"({"ip":"10.0.0.1","port":1})");
+    CHECK(!noNetwork.hostsNetwork());
+    CHECK(connectionInfoToJson(noNetwork).find("hip") == std::string::npos);
+
+    auto rejects = [](const std::string& extra, const char* what) {
+        return throwsWith([&] { parseConnectionInfo(R"({"ip":"10.0.0.1","port":1)" + extra + "}"); }, what);
+    };
+    CHECK(rejects(R"(,"ssid":"x","psk":"short12")", "Invalid Wi-Fi password"));            // 7 characters
+    CHECK(rejects(R"(,"ssid":"x","psk":")" + std::string(64, 'g') + "\"", "Invalid Wi-Fi password"));
+    CHECK(rejects(R"(,"ssid":"x","psk":")" + std::string(64, 'p') + "q\"", "Invalid Wi-Fi password"));
+    CHECK(rejects(R"(,"ssid":"x","psk":"pass\nword")", "Invalid Wi-Fi password"));
+    CHECK(rejects(R"(,"ssid":")" + std::string(33, 's') + "\"", "Invalid Wi-Fi network name"));
+    CHECK(rejects(R"(,"ssid":"bad\u0007name")", "Invalid Wi-Fi network name"));
+    CHECK(rejects(R"(,"psk":"password1")", "without a network name"));
+    CHECK(rejects(R"(,"hip":"192.168.49.1")", "without a network name"));
+    CHECK(rejects(R"(,"ssid":"x","hip":"192.168.049.1")", "Invalid hosted-network address"));
+    CHECK(rejects(R"(,"ssid":"x","hip":"256.1.1.1")", "Invalid hosted-network address"));
+    CHECK(rejects(R"(,"ssid":"x","hip":"1.2.3")", "Invalid hosted-network address"));
+    CHECK(rejects(R"(,"ssid":"x","hip":"1.2.3.4.5")", "Invalid hosted-network address"));
+    CHECK(rejects(R"(,"ssid":"x","hip":"1.2.3.4 ")", "Invalid hosted-network address"));
+    CHECK(throwsWith([] { parseConnectionInfo(R"({"v":1,"transport":"rfcomm","name":"P","ssid":"x"})"); },
+                     "needs a TCP port"));
+
+    CHECK(anyshare::isValidIpv4("0.0.0.0") && anyshare::isValidIpv4("255.255.255.255"));
+    CHECK(!anyshare::isValidIpv4("") && !anyshare::isValidIpv4("1.2.3.") && !anyshare::isValidIpv4(".1.2.3"));
+    CHECK(anyshare::isValidWifiPsk("12345678") && anyshare::isValidWifiPsk(std::string(63, '~')));
+    CHECK(!anyshare::isValidWifiPsk(std::string(65, 'a')));
+    CHECK(anyshare::isValidWifiSsid("\xe0\xa4\x85\xe0\xa4\xa8"));   // UTF-8 (Devanagari) is fine
 }
 
 static void testOfferLimits() {
@@ -629,6 +685,7 @@ int main() {
         {"crc32", testCrc32},
         {"sanitize filenames", testSanitize},
         {"handover parser (all schemas)", testHandoverParser},
+        {"handover: hosted Wi-Fi network (ssid/psk/hip)", testHostedNetworkPayload},
         {"offer limits", testOfferLimits},
         {"no-overwrite commit", testNoOverwrite},
         {"tcp: small + empty + multi + collision", testSmallAndEmptyAndMulti},

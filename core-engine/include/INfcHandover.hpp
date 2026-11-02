@@ -17,9 +17,11 @@ struct FileMetadata {
 // Everything a sender needs to reach a receiver. Produced by a handover
 // strategy (physical NFC tap, simulated tap, manual entry, Bluetooth picker).
 struct ConnectionInfo {
-    // Optional Wi-Fi Direct credentials (only meaningful when joining a P2P group).
-    std::string ssid;
-    std::string psk;
+    // Optional Wi-Fi network the publishing phone hosts right now (a Wi-Fi Direct group or a
+    // local-only hotspot), so a device that shares no network with it can join and connect directly.
+    std::string ssid;            // 1-32 bytes, no control characters
+    std::string psk;             // WPA2 passphrase (8-63 printable ASCII) or 64 hex digits; empty = open network
+    std::string hostedIp;        // the phone's IPv4 address on that network ("hip"); same port as below
 
     // Payload transport: "tcp" (Wi-Fi / LAN / Wi-Fi Direct) or "rfcomm" (Bluetooth).
     std::string transport = "tcp";
@@ -38,6 +40,11 @@ struct ConnectionInfo {
     std::string role = "receive";
 
     std::vector<FileMetadata> files;   // files to send (sender side)
+
+    bool hostsNetwork() const { return !ssid.empty(); }
+    // Where to connect after joining the hosted network. Older payloads put the group owner's
+    // address in "ip" and had no "hip".
+    const std::string& addressOnHostedNetwork() const { return hostedIp.empty() ? ip : hostedIp; }
 };
 
 // Strategy interface: how the sender learns where the receiver is.

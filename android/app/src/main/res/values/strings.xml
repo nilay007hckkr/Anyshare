@@ -1,0 +1,37 @@
+<resources>
+    <string name="app_name">AnyShare</string>
+    <string name="title">AnyShare</string>
+    <string name="subtitle">Tap to exchange connection details, then stream files.</string>
+    <string name="choose_files">Add files</string>
+    <string name="send">Send</string>
+    <string name="receive">Receive</string>
+    <string name="start_receiving">Start receiving</string>
+    <string name="stop_receiving">Stop receiving</string>
+    <string name="cancel_transfer">Cancel</string>
+    <string name="mode_hotspot_description">Transfer mode settings. Long-press to choose hardware NFC, Bluetooth fallback or NFC-style demo mode.</string>
+    <string name="demo_tap_hint">Demo: tap this card to simulate the NFC tap</string>
+    <string name="hce_service_description">AnyShare receive mode</string>
+    <string name="hce_aid_group">AnyShare connection handover</string>
+
+    <!-- Send tab -->
+    <string name="tab_send">Send</string>
+    <string name="tab_receive">Receive</string>
+    <string name="files_title">Files</string>
+    <string name="files_empty">No files yet — tap Add files</string>
+    <string name="nearby_title">Nearby devices</string>
+    <string name="nearby_searching">Looking for devices in Receive mode on this Wi-Fi…</string>
+    <string name="nearby_none">None found — the other device must tap Receive (same Wi-Fi)</string>
+    <string name="refresh">Refresh</string>
+    <string name="send_nfc">Send by NFC tap</string>
+    <string name="send_other_ways">Other ways (Bluetooth / IP address)</string>
+    <string name="send_demo_partner">Choose demo partner</string>
+    <string name="remove_file">Remove file</string>
+
+    <!-- Receive tab -->
+    <string name="receive_not_visible">Not visible — tap Start receiving</string>
+    <string name="receive_icon_description">This phone</string>
+
+    <!-- Transfer card -->
+    <string name="open_downloads">Open Downloads</string>
+    <string name="state_idle">Ready</string>
+</resources>

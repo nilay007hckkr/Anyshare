@@ -1,0 +1,11 @@
+# Build output and machine-specific files (were committed on the original
+# Android branch because its .gitignore was emptied by a merge).
+.gradle/
+build/
+.cxx/
+.externalNativeBuild/
+local.properties
+.idea/
+*.iml
+captures/
+.kotlin/

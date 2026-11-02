@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#818CF8</color>
+    <color name="primary_variant">#A5B4FC</color>
+    <color name="on_primary">#0B1020</color>
+    <color name="secondary">#38BDF8</color>
+    <color name="background">#0B1020</color>
+    <color name="surface">#161B2E</color>
+    <color name="surface_variant">#1E2540</color>
+    <color name="surface_stroke">#2A3150</color>
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="badge_bg">#1E1B4B</color>
+    <color name="badge_text">#C7D2FE</color>
+    <color name="success">#34D399</color>
+    <color name="pulse">#6366F1</color>
+
+    <color name="state_send">#A78BFA</color>
+    <color name="state_receive">#FB7185</color>
+    <color name="state_done">#34D399</color>
+    <color name="state_error">#FBBF24</color>
+</resources>

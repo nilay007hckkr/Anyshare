@@ -13,6 +13,9 @@
 //   v1 (current) : {"v":1,"transport":"rfcomm","bt":"AA:..","ch":0,"name":"..","token":".."}
 //                  {"v":1,"transport":"tcp","ip":"192.168.1.5","port":8080,"name":"..","token":".."}
 //                  optional "role":"send" = the publisher has files and waits to be fetched (default "receive")
+//                  optional "ssid","psk","hip" = a Wi-Fi network the publisher hosts (Wi-Fi Direct group or
+//                  local-only hotspot) and its address there; a reader with no shared network joins it.
+//                  These values end up in nmcli / Windows WLAN profiles, so they are validated strictly.
 //   main (multi) : {"ssid","psk","ip","port","files":[{"filename","mimeType","filesize","checksum"}]}
 //   Android-Almas: {"ssid","psk","ip","port","filename","filesize"}
 namespace anyshare {
@@ -27,6 +30,50 @@ inline bool isValidBluetoothAddress(const std::string& a) {
         } else if (!std::isxdigit(static_cast<unsigned char>(a[i]))) {
             return false;
         }
+    }
+    return true;
+}
+
+// Strict dotted-quad IPv4 ("192.168.49.1"): four decimal octets 0-255 without leading zeros, nothing else.
+inline bool isValidIpv4(const std::string& a) {
+    int octets = 0;
+    std::size_t i = 0;
+    while (i <= a.size()) {
+        std::size_t start = i;
+        int value = 0;
+        while (i < a.size() && std::isdigit(static_cast<unsigned char>(a[i])) && i - start < 3) {
+            value = value * 10 + (a[i] - '0');
+            ++i;
+        }
+        if (i == start || value > 255 || (i - start > 1 && a[start] == '0')) return false;
+        ++octets;
+        if (i == a.size()) return octets == 4;
+        if (a[i] != '.' || octets == 4) return false;
+        ++i;
+    }
+    return false;
+}
+
+// SSID: 1-32 bytes (any UTF-8), but no control characters.
+inline bool isValidWifiSsid(const std::string& s) {
+    if (s.empty() || s.size() > 32) return false;
+    for (unsigned char c : s) {
+        if (c < 0x20 || c == 0x7F) return false;
+    }
+    return true;
+}
+
+// WPA2 passphrase (8-63 printable ASCII) or a raw 256-bit key (64 hex digits).
+inline bool isValidWifiPsk(const std::string& p) {
+    if (p.size() == 64) {
+        for (unsigned char c : p) {
+            if (!std::isxdigit(c)) return false;
+        }
+        return true;
+    }
+    if (p.size() < 8 || p.size() > 63) return false;
+    for (unsigned char c : p) {
+        if (c < 0x20 || c > 0x7E) return false;
     }
     return true;
 }
@@ -128,6 +175,27 @@ inline ConnectionInfo parseConnectionInfo(const std::string& jsonText) {
     if (info.deviceName.size() > 248) throw std::invalid_argument("Field too long: name");
     if (info.sessionToken.size() > 64) throw std::invalid_argument("Field too long: token");
 
+    info.hostedIp = optionalString(j, "hip");
+    if (!info.ssid.empty() && !isValidWifiSsid(info.ssid)) {
+        throw std::invalid_argument("Invalid Wi-Fi network name (ssid): 1-32 bytes, no control characters");
+    }
+    if (!info.psk.empty()) {
+        if (info.ssid.empty()) throw std::invalid_argument("Wi-Fi password (psk) given without a network name (ssid)");
+        if (!isValidWifiPsk(info.psk)) {
+            throw std::invalid_argument("Invalid Wi-Fi password (psk): 8-63 printable ASCII characters or 64 hex digits");
+        }
+    }
+    if (!info.hostedIp.empty()) {
+        if (info.ssid.empty()) throw std::invalid_argument("Hosted-network address (hip) given without a network name (ssid)");
+        if (!isValidIpv4(info.hostedIp)) throw std::invalid_argument("Invalid hosted-network address (hip): " + info.hostedIp);
+    }
+    if (info.hostsNetwork()) {
+        if (info.port == 0) throw std::invalid_argument("A hosted Wi-Fi network needs a TCP port to connect to");
+        if (info.addressOnHostedNetwork().empty()) {
+            throw std::invalid_argument("A hosted Wi-Fi network needs an address (hip or ip)");
+        }
+    }
+
     if (j.contains("files")) {
         if (!j.at("files").is_array()) throw std::invalid_argument("Field must be an array: files");
         for (const auto& f : j.at("files")) info.files.push_back(parseFile(f));
@@ -157,6 +225,7 @@ inline std::string connectionInfoToJson(const ConnectionInfo& info, bool include
     if (!info.sessionToken.empty()) j["token"] = info.sessionToken;
     if (!info.ssid.empty()) j["ssid"] = info.ssid;
     if (!info.psk.empty()) j["psk"] = info.psk;
+    if (!info.hostedIp.empty()) j["hip"] = info.hostedIp;
     if (includeFiles) {
         j["files"] = nlohmann::json::array();
         for (const auto& f : info.files) {
